@@ -1,3 +1,5 @@
+#!/bin/python3
+
 import socket
 import struct
 import curses
@@ -6,6 +8,7 @@ import argparse
 import signal
 import sys
 import select
+import logging
 
 PORT = 4242
 BUFFER_SIZE = 1024
@@ -17,12 +20,25 @@ scroll_offset = 0
 input_history = []
 input_history_index = 0
 
+def setup_logger(log_file):
+    logger = logging.getLogger('log_file_logger')
+
+    logger.setLevel(logging.DEBUG)
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)    
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    return logger
+
+logger = setup_logger("part3_client.log")
+
 def send_message(sock, message):
     """Envoie un message au serveur."""
     try:
         msg_len = len(message)
         msg_len_packed = struct.pack('!H', msg_len)
-        sock.sendall(msg_len_packed + message.encode())
+        sock.sendall(msg_len_packed + message)
     except Exception as e:
         lines.append(('error', f"Erreur d'envoi : {e}"))
 
@@ -33,10 +49,11 @@ def receive_message(sock):
         if not msg_len_packed:
             return None
         msg_len = struct.unpack('!H', msg_len_packed)[0]
-        message = sock.recv(msg_len).decode()
+        message = sock.recv(msg_len)
         return message
     except Exception as e:
         lines.append(('error', f"Erreur de réception : {e}"))
+        logger.debug(f"Erreur de réception : {e}")
         return None
 
 def init_curses():
@@ -81,7 +98,7 @@ def draw_lines(stdscr, max_y, max_x, current_lines):
 
 def draw_input_field(stdscr, max_y, input_str):
     """Dessine la zone de saisie de texte."""
-    stdscr.addstr(max_y - 1, 0, "> " + input_str[:max_y - 2], curses.A_BOLD)
+    stdscr.addstr(max_y - 1, 0, "> " + input_str, curses.A_BOLD)
 
 def draw_interface(stdscr, force_update=False):
     """Dessine l'interface utilisateur complète."""
@@ -129,14 +146,26 @@ def handle_input_key(key, stdscr, sock):
 def process_input_command(sock):
     """Traite la commande entrée par l'utilisateur."""
     global input_str, redirect_to_file
+
     if input_str:
         if '>' in input_str:
             parts = input_str.split('>')
             command = parts[0].strip()
             redirect_to_file = parts[1].strip()
-            send_message(sock, command)
+            send_message(sock, command.encode())
+        elif '<' in input_str:  # Ajout de la gestion de '<'
+            parts = input_str.split('<')
+            command = parts[0].strip()
+            redirect_from_file = parts[1].strip()
+            try:
+                with open(redirect_from_file, 'rb') as f:
+                    file_data = f.read()
+                    send_message(sock, command.encode() + file_data)  # Envoie le contenu du fichier au serveur
+                lines.append(('info', f"Message envoyé depuis {redirect_from_file}"))
+            except Exception as e:
+                lines.append(('error', f"Erreur de lecture du fichier : {e}"))
         else:
-            send_message(sock, input_str)
+            send_message(sock, input_str.encode())
         lines.append(('sent', input_str))
         input_history.append(input_str)
         input_history_index = len(input_history)
@@ -146,6 +175,7 @@ def navigate_input_history(direction):
     """Navigue dans l'historique des saisies."""
     global input_str, input_history_index
     new_index = input_history_index + direction
+
     if 0 <= new_index < len(input_history):
         input_history_index = new_index
         input_str = input_history[input_history_index]
@@ -181,12 +211,12 @@ def main(stdscr, server_ip):
                 break
 
             if redirect_to_file:
-                with open(redirect_to_file, 'w') as f:
+                with open(redirect_to_file, 'wb') as f:
                     f.write(message)
                 lines.append(('info', f"Message redirigé vers {redirect_to_file}"))
                 redirect_to_file = None
             else:
-                for line in message.split('\n'):
+                for line in message.decode('utf-8', errors='ignore').replace('\0', '').split('\n'):
                     lines.append(('received', line))
 
             draw_interface(stdscr, force_update=True)

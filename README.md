@@ -128,7 +128,7 @@ https://www.youtube.com/watch?v=HSlhY4Uy8SA
 
 # Partie 3
 
-## Exercice 1
+## Exercice 1:
 
 L'objectif est d'exploiter une buffer overflow à distance. Cette fois-ci, la buffer overflow est présente sur un serveur `part3_server.c` qu'on compilera avec:
 ```sh
@@ -141,6 +141,38 @@ python3 ./part3_client.py 127.0.0.1
 ```
 
 Liste des failles à exploiter:
-- Une vulnérabilité "leak memory" dans la commande `/list` cela vous permet d'identifier facilement l'adresse de la fonction `handle_admin_panel` qui va vous octroyer un shell bash à distance !
+- Une vulnérabilité "leak memory" dans la commande `/inbox view` cela vous permet d'identifier facilement l'adresse de la fonction `handle_admin_panel` qui va vous octroyer un shell bash à distance !
 
-- Une vulnérabilité buffer overflow dans la commande `/list` également.
+- Une vulnérabilité buffer overflow dans la commande `/inbox send` également.
+
+### Comment utiliser le client `part3_client.py` ?
+
+Afin d'envoyer et de recevoir des données binaire (nécessaire pour exploiter les vulnérabilités), le client met à disposition des commandes de redirection `>` et `<` qui fonctionnent comme dans un environnement bash.
+Voici des exemples:
+
+```sh
+/inbox view 30 > output.txt
+/inbox send 42 < input.txt
+```
+
+Pour trouver la vulnérabilité de fuite mémoire, essayez des nombres un peu plus grand que 30 dans `/inbox view 30 > output.txt`.
+
+Certaines valeurs sont "non-printable", mais on peut utiliser les redirections ainsi que la commande `xxd output.txt` afin d'afficher les valeurs hexadécimales en brut.
+
+## Étapes:
+
+1. Lire suffisamment de données à partir du leak mémoire et identifier la taille maximale du buffer.
+
+2. Identifier le décalage de l'EIP (l'offset).
+
+3. Écrire par dessus le buffer grâce à la commande `/inbox send` pour écraser l'EIP et injecter son shellcode ou appeler `handle_admin_panel`.
+
+## Exercice 2:
+
+L'objectif final de cette dernière partie est de parvenir à exploiter cette même faille mais silencieusement, sans aucun crash côté serveur.
+
+1. Sauvegardez les registres qui ont fuité via la faille de leak mémoire avant d'écraser l'EIP.
+
+2. Utilisez ces adresses de registres afin d'éviter de corrompre ces mêmes registres lorsque vous remplacez la valeur de l'EIP.
+
+3. Si le crash persiste, n'hésitez pas à faire usage des "NOP" (https://en.wikipedia.org/wiki/NOP_slide)

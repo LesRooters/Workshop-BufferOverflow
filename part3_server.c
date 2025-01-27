@@ -83,7 +83,7 @@ void close_client_connection(int client_fd, int *clients, int max_clients)
     }
 }
 
-void handle_client_command_help(int client_fd, int *, int, char *)
+void handle_client_command_help(int client_fd, int *, int, char *, char *)
 {
     uint16_t help_msg_len = sizeof(char) * strlen(help_message);
 
@@ -96,43 +96,25 @@ void handle_admin_panel()
     printf("PAWNED!\n");
 }
 
-void handle_client_command_list(int client_fd, int *clients, int max_clients, char *buffer)
+void handle_client_command_inbox(int client_fd, int *clients, int max_clients, char *buffer, char *inbox_msg)
 {
-    int list_max = atoi(buffer);
+    uint16_t inbox_size = 0;
 
-    if (list_max <= 0 || list_max > 2048) {
+    if (strlen(buffer) <= 6) {
         return;
     }
-    uint16_t send_max = sizeof(int) * list_max;
-    int *send_buffer = malloc(send_max);
-    if (send_buffer == NULL) {
+    inbox_size = atoi(&buffer[5]);
+    if (strncmp(buffer, " view ", 6) == 0) {
+        send(client_fd, &inbox_size, sizeof(inbox_size), 0);
+        send(client_fd, inbox_msg, inbox_size, 0);
+    } else if (strncmp(buffer, " send ", 6) == 0) {
+        strncpy(inbox_msg, &buffer[8], inbox_size);
+    } else {
         return;
     }
-    memcpy(send_buffer, clients, send_max);
-    size_t escaped_size = send_max * 4 + 1;
-    char *escaped_buffer = malloc(escaped_size);
-    if (escaped_buffer == NULL) {
-        free(send_buffer);
-        return;
-    }
-    char *escaped_ptr = escaped_buffer;
-    for (size_t i = 0; i < send_max; i++) {
-        uint8_t byte = ((uint8_t *)send_buffer)[i];
-        escaped_ptr += sprintf(escaped_ptr, "\\x%02X", byte);
-    }
-    uint16_t escaped_length = strlen(escaped_buffer);
-    send(client_fd, &escaped_length, sizeof(escaped_length), 0);
-    send(client_fd, escaped_buffer, escaped_length, 0);
-    free(send_buffer);
-    free(escaped_buffer);
 }
 
-void handle_client_command_upload(int client_fd, int *clients, int max_clients, char *buffer)
-{
-    //08049616
-}
-
-void handle_client_command(int client_fd, int *clients, int max_clients, char *buffer)
+void handle_client_command(int client_fd, int *clients, int max_clients, char *buffer, char *inbox_msg)
 {
     command_t *command_ptr = (command_t *)commands;
     size_t command_len = 0;
@@ -140,12 +122,12 @@ void handle_client_command(int client_fd, int *clients, int max_clients, char *b
     for (; command_ptr < commands + COMMANDS_COUNT; command_ptr++) {
         command_len = strlen(command_ptr->name);
         if (strncmp(command_ptr->name, buffer, command_len) == 0) {
-            command_ptr->handle(client_fd, clients, max_clients, &buffer[command_len]);
+            command_ptr->handle(client_fd, clients, max_clients, &buffer[command_len], inbox_msg);
         }
     }
 }
 
-void handle_client_message(int client_fd, int *clients, int max_clients)
+void handle_client_message(int client_fd, int *clients, int max_clients, char *inbox_msg)
 {
     uint16_t msg_len = receive_message_length(client_fd);
     char buffer[BUFFER_SIZE];
@@ -159,7 +141,7 @@ void handle_client_message(int client_fd, int *clients, int max_clients)
         return;
     }
     if (buffer[0] == '/') {
-        handle_client_command(client_fd, clients, max_clients, &buffer[1]);
+        handle_client_command(client_fd, clients, max_clients, &buffer[1], inbox_msg);
         return;
     }
     broadcast_message(client_fd, clients, max_clients, (char *)&msg_len, sizeof(msg_len));
@@ -197,17 +179,18 @@ void accept_new_client(int server_fd, int *clients)
     }
 }
 
-void handle_active_clients(fd_set *read_fds, int *clients, int max_clients)
+void handle_active_clients(fd_set *read_fds, int *clients, int max_clients, char *inbox_msg)
 {
     for (int i = 0; i < max_clients; i++) {
         if (clients[i] != -1 && FD_ISSET(clients[i], read_fds)) {
-            handle_client_message(clients[i], clients, max_clients);
+            handle_client_message(clients[i], clients, max_clients, inbox_msg);
         }
     }
 }
 
 void server_loop(int server_fd)
 {
+    char inbox_msg[64] = "Il n'y a aucun message pour le moment";
     int clients[MAX_CLIENTS];
     fd_set read_fds;
     int max_fd;
@@ -222,7 +205,7 @@ void server_loop(int server_fd)
         if (FD_ISSET(server_fd, &read_fds))
             accept_new_client(server_fd, clients);
 
-        handle_active_clients(&read_fds, clients, MAX_CLIENTS);
+        handle_active_clients(&read_fds, clients, MAX_CLIENTS, inbox_msg);
     }
 }
 
